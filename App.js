@@ -1,12 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Modal } from 'react-native';
 import { initializeApp } from '@firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut } from '@firebase/auth';
 import { ImageBackground } from 'react-native';
 import { Image } from 'react-native';
 import backgroundImage from './images/bg.jpg';
 import logoImage from './images/logo.jpg';
-
 
 const firebaseConfig = {
   apiKey: "AIzaSyBnE18Z93oLyVI8DbYhR2--1-v_tYyCsAQ",
@@ -21,11 +20,9 @@ const app = initializeApp(firebaseConfig);
 
 const AuthScreen = ({ email, setEmail, password, setPassword, isLogin, setIsLogin, handleAuthentication }) => {
   return (
-    
     <View style={styles.authContainer}>
-      
-       <Text style={styles.title}>{isLogin ? 'Sign In' : 'Sign Up'}</Text>
-       <TextInput
+      <Text style={styles.title}>{isLogin ? 'Sign In' : 'Sign Up'}</Text>
+      <TextInput
         style={styles.input}
         value={email}
         onChangeText={setEmail}
@@ -65,8 +62,10 @@ const AuthenticatedScreen = ({ user, handleAuthentication }) => {
 export default App = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [user, setUser] = useState(null); // Track user authentication state
+  const [user, setUser] = useState(null);
   const [isLogin, setIsLogin] = useState(true);
+  const [error, setError] = useState(null); 
+  const [isAlertVisible, setIsAlertVisible] = useState(false); // Alert állapot kezelése
 
   const auth = getAuth(app);
   useEffect(() => {
@@ -80,31 +79,30 @@ export default App = () => {
   const handleAuthentication = async () => {
     try {
       if (user) {
-        // If user is already authenticated, log out
-        console.log('User logged out successfully!');
         await signOut(auth);
       } else {
-        // Sign in or sign up
         if (isLogin) {
-          // Sign in
           await signInWithEmailAndPassword(auth, email, password);
-          console.log('User signed in successfully!');
         } else {
-          // Sign up
           await createUserWithEmailAndPassword(auth, email, password);
-          console.log('User created successfully!');
         }
       }
     } catch (error) {
-      console.error('Authentication error:', error.message);
+      console.log('Authentication error:', error.message);
+      setError(error.message); // Hibaüzenet beállítása
+      setIsAlertVisible(true); // Alert megjelenítése
     }
+  };
+
+  const closeAlert = () => {
+    setIsAlertVisible(false); // Alert bezárása
+    setError(null); // Hibaüzenet törlése
   };
 
   return (
     <ImageBackground source={backgroundImage} style={styles.background}>
-      
       <ScrollView contentContainerStyle={styles.container}>
-      <Image source={logoImage} style={styles.logo} />
+        <Image source={logoImage} style={styles.logo} />
         {user ? (
           <AuthenticatedScreen user={user} handleAuthentication={handleAuthentication} />
         ) : (
@@ -119,9 +117,24 @@ export default App = () => {
           />
         )}
       </ScrollView>
+
+      {/* Custom Alert Modal */}
+      <Modal
+        transparent={true}
+        visible={isAlertVisible}
+        animationType="slide"
+      >
+        <View style={styles.overlay}>
+          <View style={styles.alertBox}>
+            <Text style={styles.alertMessage}>{error}</Text>
+            <TouchableOpacity style={styles.alertButton} onPress={closeAlert}>
+              <Text style={styles.buttonText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </ImageBackground>
   );
-  
 }
 
 const styles = StyleSheet.create({
@@ -130,7 +143,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 16,
-    backgroundColor: '#f9fafd',
   },
   authContainer: {
     width: '90%',
@@ -145,10 +157,10 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   logo: {
-    width: 100,    // A logó szélessége
-    height: 100,   // A logó magassága
-    marginBottom: 20,  // Hézag a logó és a cím között
-    resizeMode: 'contain', // Megőrzi az arányokat
+    width: 100,
+    height: 100,
+    marginBottom: 20,
+    resizeMode: 'contain',
   },
   title: {
     fontSize: 26,
@@ -195,16 +207,37 @@ const styles = StyleSheet.create({
     paddingVertical: 15,
     borderRadius: 8,
   },
-
   background: {
     flex: 1,
-    resizeMode: 'cover', // A kép automatikusan kitölti a hátteret
+    resizeMode: 'cover',
   },
-
-  container: {
-    flexGrow: 1,
+  overlay: {
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 16,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)', // Átlátszó fekete háttér
+  },
+  alertBox: {
+    width: 300,
+    padding: 20,
+    borderRadius: 10,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  alertMessage: {
+    marginBottom: 20,
+    textAlign: 'center',
+    fontSize: 16,
+    color: '#333',
+  },
+  alertButton: {
+    backgroundColor: '#3498db',
+    paddingVertical: 10,
+    borderRadius: 5,
   },
 });
