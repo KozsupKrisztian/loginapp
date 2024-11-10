@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Modal } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Modal, FlatList } from 'react-native';
 import { initializeApp } from '@firebase/app';
-import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut } from '@firebase/auth';
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut, deleteUser } from '@firebase/auth';
+import { getFirestore, collection, addDoc, getDocs, query, where, deleteDoc, doc } from '@firebase/firestore';
 import { ImageBackground } from 'react-native';
 import { Image } from 'react-native';
 import backgroundImage from './images/bg.jpg';
@@ -17,6 +18,8 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const firestore = getFirestore(app);
 
 const AuthScreen = ({ email, setEmail, password, setPassword, isLogin, setIsLogin, handleAuthentication }) => {
   return (
@@ -39,7 +42,6 @@ const AuthScreen = ({ email, setEmail, password, setPassword, isLogin, setIsLogi
       <TouchableOpacity style={styles.button} onPress={handleAuthentication}>
         <Text style={styles.buttonText}>{isLogin ? 'Sign In' : 'Sign Up'}</Text>
       </TouchableOpacity>
-
       <Text style={styles.toggleText} onPress={() => setIsLogin(!isLogin)}>
         {isLogin ? 'Need an account? Sign Up' : 'Already have an account? Sign In'}
       </Text>
@@ -47,13 +49,86 @@ const AuthScreen = ({ email, setEmail, password, setPassword, isLogin, setIsLogi
   );
 };
 
-const AuthenticatedScreen = ({ user, handleAuthentication }) => {
+const AuthenticatedScreen = ({ user, handleLogout, handleDeleteAccount }) => {
+  const [note, setNote] = useState('');
+  const [notes, setNotes] = useState([]);
+  const userId = user.uid;
+
+  // Fetch user notes on component mount
+  const fetchNotes = async () => {
+    const q = query(collection(firestore, 'notes'), where('userId', '==', userId));
+    const querySnapshot = await getDocs(q);
+    const notesData = querySnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+    setNotes(notesData);
+  };
+
+  useEffect(() => {
+    fetchNotes();
+  }, [userId]);
+
+  // Add a new note to Firestore
+  const handleAddNote = async () => {
+    if (note.trim()) {
+      await addDoc(collection(firestore, 'notes'), { text: note, userId });
+      setNote(''); // Clear the input field
+      fetchNotes(); // Refresh the notes list
+    }
+  };
+
+  const handleDeleteNote = async (noteId) => {
+    await deleteDoc(doc(firestore, 'notes', noteId));
+    fetchNotes(); // Refresh the notes list after deletion
+  };
+
+  // Delete account and associated notes
+  const deleteAccount = async () => {
+    try {
+      const userRef = auth.currentUser;
+      const q = query(collection(firestore, 'notes'), where('userId', '==', userId));
+      const querySnapshot = await getDocs(q);
+
+      // Delete each note from Firestore
+      await Promise.all(querySnapshot.docs.map((noteDoc) => deleteDoc(doc(firestore, 'notes', noteDoc.id))));
+
+      // Delete user account
+      await deleteUser(userRef);
+    } catch (error) {
+      console.log('Error deleting account:', error);
+    }
+  };
+
   return (
     <View style={styles.authContainer}>
-      <Text style={styles.title}>Welcome</Text>
-      <Text style={styles.emailText}>{user.email}</Text>
-      <TouchableOpacity style={styles.logoutButton} onPress={handleAuthentication}>
+      <Text style={styles.title}>Welcome, {user.email}</Text>
+      
+      <TextInput
+        style={styles.input}
+        placeholder="Enter a note"
+        value={note}
+        onChangeText={setNote}
+      />
+      <TouchableOpacity style={styles.button} onPress={handleAddNote}>
+        <Text style={styles.buttonText}>Save Note</Text>
+      </TouchableOpacity>
+
+      <FlatList
+      data={notes}
+      keyExtractor={(item) => item.id}
+      renderItem={({ item }) => (
+      <View style={styles.noteContainer}>
+          <Text style={styles.noteText}>{item.text}</Text>
+            <TouchableOpacity style={styles.deleteButton} onPress={() => handleDeleteNote(item.id)}>
+          <Text style={styles.deleteButtonText}>Delete</Text>
+        </TouchableOpacity>
+      </View>
+  )}
+/>
+
+      <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
         <Text style={styles.buttonText}>Logout</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={styles.deleteAccountButton} onPress={deleteAccount}>
+        <Text style={styles.buttonText}>Delete Account</Text>
       </TouchableOpacity>
     </View>
   );
@@ -65,38 +140,32 @@ export default App = () => {
   const [user, setUser] = useState(null);
   const [isLogin, setIsLogin] = useState(true);
   const [error, setError] = useState(null); 
-  const [isAlertVisible, setIsAlertVisible] = useState(false); // Alert állapot kezelése
+  const [isAlertVisible, setIsAlertVisible] = useState(false);
 
-  const auth = getAuth(app);
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setUser(user);
     });
-
     return () => unsubscribe();
-  }, [auth]);
+  }, []);
 
   const handleAuthentication = async () => {
     try {
-      if (user) {
-        await signOut(auth);
+      if (isLogin) {
+        await signInWithEmailAndPassword(auth, email, password);
       } else {
-        if (isLogin) {
-          await signInWithEmailAndPassword(auth, email, password);
-        } else {
-          await createUserWithEmailAndPassword(auth, email, password);
-        }
+        await createUserWithEmailAndPassword(auth, email, password);
       }
     } catch (error) {
       console.log('Authentication error:', error.message);
-      setError(error.message); // Hibaüzenet beállítása
-      setIsAlertVisible(true); // Alert megjelenítése
+      setError(error.message);
+      setIsAlertVisible(true);
     }
   };
 
   const closeAlert = () => {
-    setIsAlertVisible(false); // Alert bezárása
-    setError(null); // Hibaüzenet törlése
+    setIsAlertVisible(false);
+    setError(null);
   };
 
   return (
@@ -104,7 +173,11 @@ export default App = () => {
       <ScrollView contentContainerStyle={styles.container}>
         <Image source={logoImage} style={styles.logo} />
         {user ? (
-          <AuthenticatedScreen user={user} handleAuthentication={handleAuthentication} />
+          <AuthenticatedScreen 
+            user={user} 
+            handleLogout={() => signOut(auth)} 
+            handleDeleteAccount={() => deleteAccount(auth)} 
+          />
         ) : (
           <AuthScreen
             email={email}
@@ -119,11 +192,7 @@ export default App = () => {
       </ScrollView>
 
       {/* Custom Alert Modal */}
-      <Modal
-        transparent={true}
-        visible={isAlertVisible}
-        animationType="slide"
-      >
+      <Modal transparent={true} visible={isAlertVisible} animationType="slide">
         <View style={styles.overlay}>
           <View style={styles.alertBox}>
             <Text style={styles.alertMessage}>{error}</Text>
@@ -135,8 +204,7 @@ export default App = () => {
       </Modal>
     </ImageBackground>
   );
-}
-
+};
 const styles = StyleSheet.create({
   container: {
     flexGrow: 1,
@@ -206,6 +274,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#e74c3c',
     paddingVertical: 15,
     borderRadius: 8,
+    marginBottom: 16,
+  },
+  deleteAccountButton: {
+    backgroundColor: '#c0392b',
+    paddingVertical: 15,
+    borderRadius: 8,
   },
   background: {
     flex: 1,
@@ -215,7 +289,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.5)', // Átlátszó fekete háttér
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
   },
   alertBox: {
     width: 300,
@@ -239,5 +313,35 @@ const styles = StyleSheet.create({
     backgroundColor: '#3498db',
     paddingVertical: 10,
     borderRadius: 5,
+  },
+  noteContainer: {
+    backgroundColor: '#f1f2f6',
+    padding: 10,
+    borderRadius: 8,
+    marginVertical: 5,
+  },
+  noteText: {
+    fontSize: 16,
+    color: '#333',
+  },
+
+  deleteText: {
+    color: '#e74c3c',  // Red color for visibility
+    fontSize: 16,
+    marginTop: 5,
+    textAlign: 'right',  // Align text to the right
+  },
+  deleteButton: {
+    backgroundColor: '#e74c3c',
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 5,
+    marginTop: 5,
+    alignSelf: 'flex-end',
+  },
+  deleteButtonText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: 'bold',
   },
 });
